@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Realtime Collaborative Text Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0b1020;--panel:#121a33;--muted:#7d89b0;--text:#eaf2ff;--brand:#6ea8fe;--brand-2:#86f2c7;--danger:#ff6b6b;--ok:#39d353;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0b1020,#0e1430 35%,#0b1020);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:var(--text);}
+    .container{max-width:1100px;margin:24px auto;padding:0 16px}
+    header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
+    .app-title{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px}
+    .logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:grid;place-items:center;color:#0b1020;font-weight:800}
+    .room{font-size:12px;color:var(--muted)}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap}
+    button, .btn{appearance:none;border:0;border-radius:12px;padding:10px 14px;background:#1b2750;color:var(--text);font-weight:600;cursor:pointer;transition:.15s transform,.15s background}
+    button:hover{transform:translateY(-1px)}
+    button.primary{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#0b1020}
+    button.ghost{background:#101733;border:1px solid #223060}
+    button.danger{background:#3a1220;border:1px solid #5c1a2f;color:#ffd7d7}
+    .panel{background:rgba(255,255,255,.03);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.08);border-radius:16px}
+    .statusbar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-top-left-radius:16px;border-top-right-radius:16px}
+    .status-left{display:flex;gap:12px;align-items:center}
+    .pill{font-size:12px;padding:6px 10px;border-radius:999px;background:#0f1734;border:1px solid #223060;color:#c7d1ff}
+    .avatars{display:flex;align-items:center}
+    .avatar{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#223060;margin-left:-6px;border:2px solid #0b1020;font-size:12px}
+    .editor{min-height:420px;max-height:70vh;overflow:auto;line-height:1.6;padding:18px;border-bottom-left-radius:16px;border-bottom-right-radius:16px}
+    .editor[contenteditable="true"]{outline:none}
+    .doc{min-height:420px;padding:22px;border-radius:12px;background:#0c1330;border:1px solid #1e2a5b;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+    .doc h1{margin:0 0 12px 0}
+    .doc .meta{font-size:12px;color:var(--muted);margin-bottom:16px}
+    .footer{display:flex;gap:10px;justify-content:space-between;margin-top:14px;color:var(--muted);font-size:12px}
+    .hidden{display:none!important}
+    .notice{margin:14px 0;padding:10px 12px;border-radius:12px;background:#11224d;border:1px dashed #28407d;color:#cfe2ff;font-size:12px}
+    .sidebar{margin-top:18px;display:grid;gap:10px;grid-template-columns:1fr 360px}
+    .card{padding:12px}
+    .versions{max-height:280px;overflow:auto}
+    .version-item{padding:8px;border-radius:10px;border:1px solid #203064;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+    a{color:#cfe2ff}
+    @media (max-width:900px){.sidebar{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="app-title">
+        <div class="logo">RT</div>
+        <div>
+          <div>Realtime Collaborative Text Editor</div>
+          <div class="room">Room: <span id="room-id"></span></div>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button id="copy-link" class="ghost" title="Copy shareable link">Copy Link</button>
+        <button id="make-readonly" class="ghost" title="Get read‑only link">Read‑only Link</button>
+        <button id="save-version" class="ghost" title="Save a snapshot version">Save Version</button>
+        <button id="sign-in" class="primary">Sign in with Google</button>
+        <button id="sign-out" class="danger hidden">Sign out</button>
+      </div>
+    </header>
+
+    <div class="panel">
+      <div class="statusbar">
+        <div class="status-left">
+          <span class="pill" id="auth-state">Signed out</span>
+          <span class="pill" id="perm-state">Role: —</span>
+          <span class="pill" id="sync-state">Sync: idle</span>
+        </div>
+        <div class="avatars" id="avatars"></div>
+      </div>
+      <div class="editor">
+        <div class="doc">
+          <h1 contenteditable="true" id="title">Untitled document</h1>
+          <div class="meta">Last saved: <span id="last-saved">—</span></div>
+          <div id="content" contenteditable="true" spellcheck="true">
+            <p>Welcome! Start typing here. Invite collaborators with the link. Changes update in real‑time.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="card panel">
+        <div style="padding:10px 12px 0 12px"><strong>Versions</strong></div>
+        <div class="card versions" id="versions"></div>
+      </div>
+      <div class="card panel">
+        <div class="notice">
+          <strong>Setup required:</strong> Add your Firebase config below, then deploy as a static site. Security Rules are provided inside the code comments.
+        </div>
+        <div class="card" style="padding-top:0">
+<pre style="white-space:pre-wrap; font-size:12px; color:#cfe2ff">
+// 1) Create a Firebase project
+// 2) Enable Authentication: Google
+// 3) Create a Cloud Firestore database (in test or with the rules below)
+// 4) Fill firebaseConfig in the script
+// 5) Open this file via https or localhost (not file://)
+</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>Tip: Use different browsers or windows to test collaboration.</div>
+      <div>Built with Firebase Web v10 (modular).</div>
+    </div>
+  </div>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+       const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+      projectId: "YOUR_PROJECT_ID",
+      storageBucket: "YOUR_PROJECT_ID.appspot.com",
+      messagingSenderId: "REPLACE_ME",
+      appId: "REPLACE_ME"
+    };
+
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, GoogleAuthProvider, onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, serverTimestamp, collection, addDoc, query, where, orderBy, limit, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+       const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+    const roomId = (location.hash.replace('#','') || crypto.randomUUID()).slice(0, 12);
+    if (!location.hash) location.hash = roomId;
+    $('#room-id').textContent = roomId;
+
+    const readOnly = new URLSearchParams(location.search).get('ro') === '1';
+
+    const docRef = doc(db, 'rooms', roomId);
+    const presenceRef = collection(docRef, 'presence');
+    const versionsRef = collection(docRef, 'versions');
+
+    const $title = $('#title');
+    const $content = $('#content');
+    const $avatars = $('#avatars');
+    const $authState = $('#auth-state');
+    const $permState = $('#perm-state');
+    const $syncState = $('#sync-state');
+    const $lastSaved = $('#last-saved');
+
+    const state = {
+      uid: null,
+      role: 'viewer', // 'owner' | 'editor' | 'viewer'
+      unsub: null,
+      unsubPresence: null,
+      unsubVersions: null,
+      writeTimer: null,
+      suppressLocal: false,
+      ownerUid: null,
+    };
+
+       function applyPermissions(){
+      const canEdit = !readOnly && (state.role === 'owner' || state.role === 'editor');
+      [$title, $content].forEach(el=>{
+        el.setAttribute('contenteditable', canEdit ? 'true' : 'false');
+        el.style.opacity = canEdit ? 1 : .85;
+      })
+      $('#save-version').disabled = !canEdit;
+      $('#make-readonly').disabled = !state.uid;
+      $permState.textContent = `Role: ${readOnly ? 'viewer (read‑only link)' : state.role}`;
+    }
+
+    // ======== Auth ========
+    $('#sign-in').addEventListener('click', async ()=>{
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    });
+    $('#sign-out').addEventListener('click', ()=>signOut(auth));
+
+    onAuthStateChanged(auth, async (user)=>{
+      state.uid = user?.uid || null;
+      $('#sign-in').classList.toggle('hidden', !!user);
+      $('#sign-out').classList.toggle('hidden', !user);
+      $authState.textContent = user ? `Signed in as ${user.displayName||user.email}` : 'Signed out';
+      if(user){ await ensureRoomDoc(user); trackPresence(user); determineRole(user); } else { state.role='viewer'; applyPermissions(); }
+    });
+
+    async function ensureRoomDoc(user){
+      const snap = await getDoc(docRef);
+      if(!snap.exists()){
+        await setDoc(docRef, {
+          ownerUid: user.uid,
+          editors: [user.email].filter(Boolean),
+          title: 'Untitled document',
+          content: '<p>New document. Start typing…</p>',
+          updatedAt: serverTimestamp(),
+          createdAt: serverTimestamp()
+        });
+      }
+      const data = (await getDoc(docRef)).data();
+      state.ownerUid = data.ownerUid;
+      // initial fill
+      $title.textContent = data.title || 'Untitled document';
+      $content.innerHTML = data.content || '';
+      $lastSaved.textContent = new Date().toLocaleString();
+      subscribeRealtime();
+      loadVersions();
+    }
+
+    function determineRole(user){
+      if(!user){ state.role='viewer'; applyPermissions(); return; }
+      onSnapshot(docRef,(snap)=>{
+        const data = snap.data();
+        const isOwner = data?.ownerUid === user.uid;
+        const canEdit = (data?.editors||[]).includes(user.email);
+        state.role = isOwner ? 'owner' : (canEdit ? 'editor' : 'viewer');
+        applyPermissions();
+      });
+    }
+
+        function subscribeRealtime(){
+      if(state.unsub) state.unsub();
+      state.unsub = onSnapshot(docRef,(snap)=>{
+        const d = snap.data();
+        if(!d) return;
+        if(!state.suppressLocal){
+          if($title.textContent !== d.title){ $title.textContent = d.title; }
+          if($content.innerHTML !== d.content){ $content.innerHTML = d.content; }
+        }
+        $lastSaved.textContent = new Date().toLocaleString();
+        $syncState.textContent = 'Synced';
+      });
+    }
+
+    function scheduleWrite(){
+      if(readOnly || (state.role==='viewer')) return;
+      clearTimeout(state.writeTimer);
+      $syncState.textContent = 'Saving…';
+      state.writeTimer = setTimeout(async ()=>{
+        try{
+          state.suppressLocal = true; // avoid loop on our own write snapshot
+          await updateDoc(docRef, {
+            title: $title.textContent.trim() || 'Untitled document',
+            content: $content.innerHTML,
+            updatedAt: serverTimestamp()
+          });
+          $syncState.textContent = 'Saved';
+        }catch(err){
+          // If the doc did not exist (rare race), create it
+          await setDoc(docRef, {
+            title: $title.textContent.trim() || 'Untitled document',
+            content: $content.innerHTML,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+          $syncState.textContent = 'Saved';
+        } finally {
+          setTimeout(()=>{ state.suppressLocal=false; }, 50);
+        }
+      }, 300);
+    }
+
+    ['input','keyup','paste','cut'].forEach(evt=>{
+      $title.addEventListener(evt, scheduleWrite);
+      $content.addEventListener(evt, scheduleWrite);
+    });
+
+        async function trackPresence(user){
+      // Create a presence doc for this user
+      const ref = await addDoc(presenceRef, {
+        uid: user.uid,
+        name: user.displayName || user.email || 'User',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      // Update heartbeat
+      const heartbeat = setInterval(async ()=>{
+        await updateDoc(ref, { updatedAt: serverTimestamp() })
+      }, 20000);
+      // Cleanup on unload
+      window.addEventListener('beforeunload', async ()=>{
+        clearInterval(heartbeat);
+        try{ await deleteDoc(ref); }catch(e){}
+      });
+      // Subscribe to presence updates for avatars
+      if(state.unsubPresence) state.unsubPresence();
+      const q = query(presenceRef);
+      state.unsubPresence = onSnapshot(q,(snap)=>{
+        const users = [];
+        snap.forEach(d=>users.push(d.data()));
+        renderAvatars(users);
+      });
+    }
+
+    function initials(name){
+      return name.split(/\s+/).map(p=>p[0]).join('').slice(0,2).toUpperCase();
+    }
+    function renderAvatars(users){
+      $avatars.innerHTML = '';
+      users.slice(0,8).forEach(u=>{
+        const el = document.createElement('div');
+        el.className='avatar';
+        el.title = u.name;
+        el.textContent = initials(u.name);
+        $avatars.appendChild(el);
+      });
+      if(users.length===0){
+        const el = document.createElement('div'); el.className='avatar'; el.textContent='—'; $avatars.appendChild(el);
+      }
+    }
+
+        async function loadVersions(){
+      if(state.unsubVersions) state.unsubVersions();
+      state.unsubVersions = onSnapshot(query(versionsRef, orderBy('createdAt','desc'), limit(20)), (snap)=>{
+        const wrap = $('#versions');
+        wrap.innerHTML='';
+        snap.forEach(v=>{
+          const d = v.data();
+          const item = document.createElement('div');
+          item.className='version-item';
+          item.innerHTML = `<div><strong>${new Date(d.createdAt?.toMillis?.()||Date.now()).toLocaleString()}</strong><br><span style="color:#9db3ff">${(d.authorName||'Unknown')}</span></div>`;
+          const btns = document.createElement('div');
+          const restore = document.createElement('button'); restore.className='btn ghost'; restore.textContent='Restore';
+          restore.onclick = async ()=>{
+            if(!confirm('Restore this version over the current document?')) return;
+            await updateDoc(docRef, { title: d.title, content: d.content, updatedAt: serverTimestamp() });
+          };
+          const view = document.createElement('button'); view.className='btn ghost'; view.textContent='Preview';
+          view.onclick = ()=>{
+            const win = window.open('', '_blank');
+            win.document.write(`<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas">`+d.content.replace(/</g,'&lt;')+`</pre>`);
+          };
+          btns.appendChild(view); btns.appendChild(restore); item.appendChild(btns); wrap.appendChild(item);
+        })
+      })
+    }
+
+    $('#save-version').addEventListener('click', async ()=>{
+      if(state.role==='viewer'){ alert('You need edit access to save versions.'); return; }
+      await addDoc(versionsRef, {
+        title: $title.textContent.trim() || 'Untitled document',
+        content: $content.innerHTML,
+        authorUid: state.uid,
+        authorName: $authState.textContent.replace(/^Signed in as /,''),
+        createdAt: serverTimestamp()
+      });
+      alert('Saved version!');
+    });
+
+      $('#copy-link').addEventListener('click', async ()=>{
+      const url = `${location.origin}${location.pathname}#${roomId}`;
+      await navigator.clipboard.writeText(url);
+      alert('Link copied!');
+    });
+    $('#make-readonly').addEventListener('click', async ()=>{
+      const url = `${location.origin}${location.pathname}?ro=1#${roomId}`;
+      await navigator.clipboard.writeText(url);
+      alert('Read‑only link copied!');
+    });
+
+       /*
+    rules_version = '2';
+    service cloud.firestore {
+      match /databases/{database}/documents {
+        match /rooms/{roomId} {
+          allow read: if true; // anyone with link can read
+          allow create: if request.auth != null;
+          allow update, delete: if isOwner() || isEditor();
+
+          function isOwner(){
+            return request.auth != null && resource.data.ownerUid == request.auth.uid;
+          }
+          function isEditor(){
+            return request.auth != null &&
+                   request.auth.token.email in resource.data.editors;
+          }
+
+          match /presence/{doc} {
+            allow read: if true;
+            allow create, update, delete: if request.auth != null;
+          }
+          match /versions/{doc} {
+            allow read: if true;
+            allow create: if isOwner() || isEditor();
+          }
+        }
+      }
+    }
+    */
+  </script>
+</body>
+</html>
